@@ -11,6 +11,7 @@ my $otype;
 my $olang;
 my $onlyliterals;
 my $noliterals;
+my $help;
 
 GetOptions (
             "predicate=s"   => \$predicate,      # string
@@ -20,13 +21,27 @@ GetOptions (
             "olang=s"   => \$olang,      # string
             "only-literals"  => \$onlyliterals,   # flag
             "no-literals"  => \$noliterals,   # flag
+            "help"  => \$help,   # flag
 ) or help(1);
+help(0) if( $help );
+
 sub help
 {
 	my( $exitcode ) = @_;
 
-	print STDERR "$0 [--predicate text] [--subject text] [--object text] [--otype text] [--olang text] [--only-literals|--no-literals] <filename>\n";
+	print STDERR <<END;
+$0 <options> [<filename>]
 
+Filters a stream of NTriples to remove unwanted ones. Does not understand bnodes yet.
+
+--predicate <text> : predicate must containt this text
+--subject <text>   : subject must containt this text
+--object <text>    : object must containt this text
+--otype <text>     : object type must containt this text
+--only-literals    : Only output triples where the object is a literal
+--no-literals      : Only output triples where the object is not a literal
+
+END
 	exit $exitcode;
 }
 
@@ -34,6 +49,7 @@ if( $onlyliterals && $noliterals ) {
 	error( "Can't set --only-literals and --no-literals -- you'd have nothing left!" );
 }
 
+@ARGV = ( "-" ) if( @ARGV == 0 ); #default to stdin
 if( @ARGV != 1 )
 {	
 	error( "Did not specify a filename." );
@@ -50,38 +66,33 @@ else
 }
 while( my $line = readline( $fh ) )
 {
+	############################################################
+	# NTriples Line parser
+	# Repeated in every script so they are stand alone but if there's
+	# a bug it needs to be fixed in all the scripts
+	############################################################
 	chomp $line;
-	# s,p,o all have a leading char
-	my( $s, $p, $o ) = split( /> /, $line, 3 );
-	my $islit = substr( $o, 0, 1 ) eq '"';
+	$line =~ m/^(\<([^>]*)\>|(_:[^ ]*)) \<([^>]*)\> (\<([^>]*)\>|(_:[^ ]*)|"([^"]*)"(\^\^\<([^>]*)\>|\@([^ ]+))?) \.$/;
+	my $s = $2||$3;
+	my $p = $4;
+	my $o = $6||$7||$8;
+	my $islit = defined $8;
+	my $ot = $10;
+	my $ol = $11;
+	############################################################
+
 	next if( $onlyliterals && !$islit );
 	next if( $noliterals && $islit );
 
-	#nb. using index search starting at char after the leading <
-	next if( defined $subject && index($s,$subject,1)==-1 );
+	next if( defined $subject && index($s,$subject)==-1 );
 	
-	next if( defined $predicate && index($p,$predicate,1)==-1 );
+	next if( defined $predicate && index($p,$predicate)==-1 );
 
-	my( $ot, $ol );
-	if( $islit )
-	{
-		( $o, $ot ) = split( /"\^\^\</, $o, 2 );
-		( $o, $ol ) = split( /"@/, $o, 2 );
-		# o has a leading char but ot does not but has some bits on the end
-		$ot =~ s/> \.$// if defined $ot;
-		$ol =~ s/ \.$// if defined $ol;
-		$o =~ s/" \.$// if !defined $ot && !defined $ol;
-	}
-	else
-	{
-		$o =~ s/\> \.$//;
-	}
+	next if( defined $object && index($o,$object)==-1 );
 
-	next if( defined $object && index($o,$object,1)==-1 );
+	next if( defined $otype && (!defined $ot || index($ot,$otype)==-1 ));
 
-	next if( defined $otype && (!defined $ot || index($ot,$otype,0)==-1 ));
-
-	next if( defined $olang && (!defined $ol || index($ol,$olang,0)==-1 ));
+	next if( defined $olang && (!defined $ol || index($ol,$olang)==-1 ));
 
 	print $line."\n";
 }

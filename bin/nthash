@@ -10,12 +10,17 @@ use warnings;
 my $prefixtohash;
 my $namespace;
 my $salt;
+my $help;
+my $sameas;
 
 GetOptions (
             "prefix=s"   => \$prefixtohash,      
             "namespace=s"   => \$namespace,
             "salt=s"   => \$salt,
+            "help"  => \$help,   # flag
+            "sameas"  => \$sameas,   # flag
 ) or help(1);
+help(0) if( $help );
 help(1) if !defined $prefixtohash;
 help(1) if !defined $namespace;
 
@@ -23,11 +28,25 @@ sub help
 {
 	my( $exitcode ) = @_;
 
-	print STDERR "$0 --prefix <text> --namespace <text> [--salt <text>] <filename>\n";
+	print STDERR <<END;
+$0 --prefix <text> --namespace <text> [--salt <text>] [--sameas] <filename>
+
+Note that this just obfuscates the URIs and is not a full solution to making
+data anonymous. 
+
+--prefix    <text> : required. The start of the URIs to anonymise.
+--namespace <text> : required. Namespace in which to create new URIs.
+--salt      <text> : optional. If included this will salt the hash with this 
+                      value. Effectively a password to decode them later.
+--sameas           : optional. If set this will output a list of sameAs 
+                      triples to link from the original to the hashed URIs.
+                      This must use the same value for --salt, if any.
+END
 
 	exit $exitcode;
 }
 
+@ARGV = ( "-" ) if( @ARGV == 0 ); #default to stdin
 if( @ARGV != 1 )
 {	
 	error( "Did not specify a filename." );
@@ -42,50 +61,83 @@ else
 {
 	open( $fh, "<:utf8", $filename ) || error( "Could not read $filename: $!" );
 }
-while( my $line = readline( $fh ) )
+my $seen = {}; # global
+LINE: while( my $line = readline( $fh ) )
 {
+	############################################################
+	# NTriples Line parser
+	# Repeated in every script so they are stand alone but if there's
+	# a bug it needs to be fixed in all the scripts
+	############################################################
 	chomp $line;
-	# s,p,o all have a leading char
-	my( $s, $p, $o ) = split( /> /, $line, 3 );
-	my $islit = substr( $o, 0, 1 ) eq '"';
-	$s = substr($s,1);
-	$p = substr($p,1);
-	$o = substr($o,1);
+	$line =~ m/^(\<([^>]*)\>|(_:[^ ]*)) \<([^>]*)\> (\<([^>]*)\>|(_:[^ ]*)|"([^"]*)"(\^\^\<([^>]*)\>|\@([^ ]+))?) \.$/;
+	my $s = $2||$3;
+	my $p = $4;
+	my $o = $6||$7||$8;
+	my $islit = defined $8;
+	my $ot = $10;
+	my $ol = $11;
+	############################################################
+	my $s_bnode = defined $3;
+	my $o_bnode = defined $7;
 
-	$s = process($s);
-	$p = process($p);
-	my( $ot, $ol );
-	if( $islit )
+	if( $sameas )
 	{
-		( $o, $ot ) = split( /"\^\^\</, $o, 2 );
-		( $o, $ol ) = split( /"@/, $o, 2 );
-		# o has a leading char but ot does not but has some bits on the end
-		$ot =~ s/> \.$// if defined $ot;
-		$ol =~ s/ \.$// if defined $ol;
-		$o =~ s/" \.$// if !defined $ot && !defined $ol;
-		$ot = process($ot);
+		sameas( $s );
+		sameas( $p );
+		sameas( $o );
+		sameas( $ot );
+		next LINE;
+	}
+		
+
+	my( $sout, $pout, $oout, $otout );
+
+	if( $s_bnode )
+	{
+		$sout = $s;
 	}
 	else
 	{
-		$o =~ s/> \.//;
-		$o = process($o);
+		$sout = "<".process($s).">";
+	}
+
+	if( $o_bnode )
+	{
+		$oout = $o;
+	}
+	elsif( $islit )
+	{
+		$oout = "<".process($o).">";
+	}
+
+	# poor old p can't be a bnode
+	$pout = "<".process($p).">";
+
+	if( !$islit )
+	{
+		$oout = "<".process($o).">";
+	}
+	elsif( defined $ot )
+	{
+		$otout = "<".process($ot).">";
 	}
 
 	if( defined $ot )
 	{
-		print "<$s> <$p> \"$o\"^^<$ot> .\n";
+		print "$sout $pout \"$o\"^^$otout .\n";
 	}
 	elsif( defined $ol )
 	{
-		print "<$s> <$p> \"$o\"\@$ol .\n";
+		print "$sout $pout \"$o\"\@$ol .\n";
 	}
 	elsif( $islit )
 	{
-		print "<$s> <$p> \"$o\" .\n";
+		print "$sout $pout \"$o\" .\n";
 	}
 	else
 	{
-		print "<$s> <$p> <$o> .\n";
+		print "$sout $pout $oout .\n";
 	}
 }
 exit;
@@ -98,15 +150,32 @@ sub process
 
 	if( index( $uri, $prefixtohash ) == 0 )
 	{
-		$uri.=$salt if( defined $salt );
-		return $namespace.md5_hex( $uri );
+		return hashuri($uri);
 	}
 	
 	return $uri;
 }
 
+sub hashuri
+{
+	my( $uri ) = @_;
 
+	$uri.=$salt if( defined $salt );
+	return $namespace.md5_hex( $uri );
+}
 
+# print the sameas for this uri if it is in scope, defined, and not seen before
+sub sameas
+{
+	my( $uri ) = @_;
+
+	return if !defined $uri; # might be an undefined otype
+	return if index( $uri, $prefixtohash ) != 0;
+	return if $seen->{$uri};
+
+	print "<".hashuri($uri)."> <http://www.w3.org/2002/07/owl#sameAs> <$uri> .\n";
+	$seen->{$uri} = 1;
+}
 
 
 
