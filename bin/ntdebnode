@@ -1,0 +1,120 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use Digest::MD5 qw/ md5_hex /;
+use strict;
+use warnings;
+
+my $namespace;
+my $help;
+
+srand();
+
+GetOptions (
+            "namespace=s"   => \$namespace,
+            "help"  => \$help,   # flag
+) or help(1);
+help(0) if( $help );
+help(1) if !defined $namespace;
+
+sub help
+{
+	my( $exitcode ) = @_;
+
+	print STDERR <<END;
+$0 --namespace <text> <filename>
+
+Turns bnodes into URIs so that statements can be made about them. Uses 
+the bnode ID, time, process ID and a random number to get a value.
+
+--namespace <text> : required. Namespace in which to create new URIs.
+
+END
+
+	exit $exitcode;
+}
+
+@ARGV = ( "-" ) if( @ARGV == 0 ); #default to stdin
+if( @ARGV != 1 )
+{	
+	error( "Did not specify a filename." );
+}
+my $filename = $ARGV[0];
+my $fh;
+if( $filename eq "-" )
+{
+	$fh = *STDIN;
+}
+else
+{
+	open( $fh, "<:utf8", $filename ) || error( "Could not read $filename: $!" );
+}
+my $alias = {}; # global
+LINE: while( my $line = readline( $fh ) )
+{
+	############################################################
+	# NTriples Line parser
+	# Repeated in every script so they are stand alone but if there's
+	# a bug it needs to be fixed in all the scripts
+	############################################################
+	chomp $line;
+	$line =~ m/^(\<([^>]*)\>|(_:[^ ]*)) \<([^>]*)\> (\<([^>]*)\>|(_:[^ ]*)|"([^"]*)"(\^\^\<([^>]*)\>|\@([^ ]+))?) \.$/;
+	my $s = $2||$3;
+	my $p = $4;
+	my $o = $6||$7||$8;
+	my $islit = defined $8;
+	my $ot = $10;
+	my $ol = $11;
+	############################################################
+	my $s_bnode = defined $3;
+	my $o_bnode = defined $7;
+
+	if( $s_bnode ) { $s = mkalias( $s ); }
+	if( $o_bnode ) { $o = mkalias( $o ); }
+
+	if( defined $ot )
+	{
+		print "<$s> <$p> \"$o\"^^<$ot> .\n";
+	}
+	elsif( defined $ol )
+	{
+		print "<$s> <$p> \"$o\"\@$ol .\n";
+	}
+	elsif( $islit )
+	{
+		print "<$s> <$p> \"$o\" .\n";
+	}
+	else
+	{
+		print "<$s> <$p> <$o> .\n";
+	}
+}
+exit;
+
+sub mkalias
+{
+	my( $bnode) = @_;
+
+	if( !$alias->{$bnode} )
+	{
+		my $seed = time().":".$$.":".$bnode.":".rand(1000000);
+		$alias->{$bnode} = $namespace.md5_hex( $seed );
+	}
+	
+	return( $alias->{$bnode} );
+}
+
+
+
+
+
+sub error 
+{
+	my( $error ) = @_;
+
+	print STDERR "$error\n";
+
+	exit 1;
+}
+
+
