@@ -1,0 +1,27 @@
+
+Triple Tools
+
+Stand-alone command-line scripts to process streams of ntriples (RDF).
+
+
+
+ntfilter 
+- like grep for triples
+
+ntdebnode 
+- remove bnodes and replace them with an actual URI
+
+nthash 
+- replace some URIs with a hashed version to obfuscate them. Can also 
+output a list of sameAs triples to de-obfuscate later.
+
+ntcat
+- concatenates two or more ntriples files and adds a prefix to the bnodes
+in each file to avoid clashes.A
+
+
+
+(c)2015, Christoper Gutteridge, University of Southampton
+cjg@ecs.ecs.soton.ac.uk
+
+All Triple-tools are made available under the license GPLv3.
