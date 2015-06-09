@@ -1,0 +1,114 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use Digest::MD5 qw/ md5_hex /;
+use strict;
+use warnings;
+
+my $prefixtohash;
+my $namespace;
+my $salt;
+
+GetOptions (
+            "prefix=s"   => \$prefixtohash,      
+            "namespace=s"   => \$namespace,
+            "salt=s"   => \$salt,
+) or help(1);
+help(1) if !defined $prefixtohash;
+help(1) if !defined $namespace;
+
+sub help
+{
+	my( $exitcode ) = @_;
+
+	print STDERR "urihash --prefix <text> --namespace <text> [--salt <text>] <filename>\n";
+
+	exit $exitcode;
+}
+
+if( @ARGV != 1 )
+{	
+	error( "Did not specify a filename." );
+}
+my $filename = $ARGV[0];
+open( my $fh, "<:utf8", $filename ) || error( "Could not read $filename: $!" );
+while( my $line = readline( $fh ) )
+{
+	chomp $line;
+	# s,p,o all have a leading char
+	my( $s, $p, $o ) = split( /> /, $line, 3 );
+	my $islit = substr( $o, 0, 1 ) eq '"';
+	$s = substr($s,1);
+	$p = substr($p,1);
+	$o = substr($o,1);
+
+	$s = process($s);
+	$p = process($p);
+	my( $ot, $ol );
+	if( $islit )
+	{
+		( $o, $ot ) = split( /"\^\^\</, $o, 2 );
+		( $o, $ol ) = split( /"@/, $o, 2 );
+		# o has a leading char but ot does not but has some bits on the end
+		$ot =~ s/> \.$// if defined $ot;
+		$ol =~ s/ \.$// if defined $ol;
+		$o =~ s/" \.$// if !defined $ot && !defined $ol;
+		$ot = process($ot);
+	}
+	else
+	{
+		$o =~ s/> \.//;
+		$o = process($o);
+	}
+
+	if( defined $ot )
+	{
+		print "<$s> <$p> \"$o\"^^<$ot> .\n";
+	}
+	elsif( defined $ol )
+	{
+		print "<$s> <$p> \"$o\"\@$ol .\n";
+	}
+	elsif( $islit )
+	{
+		print "<$s> <$p> \"$o\" .\n";
+	}
+	else
+	{
+		print "<$s> <$p> <$o> .\n";
+	}
+}
+exit;
+
+sub process
+{
+	my( $uri) = @_;
+
+	return undef if( !defined $uri );
+
+	if( index( $uri, $prefixtohash ) == 0 )
+	{
+		$uri.=$salt if( defined $salt );
+		return $namespace.md5_hex( $uri );
+	}
+	
+	return $uri;
+}
+
+
+
+
+
+
+
+
+sub error 
+{
+	my( $error ) = @_;
+
+	print STDERR "$error\n";
+
+	exit 1;
+}
+
+

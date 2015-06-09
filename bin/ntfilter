@@ -1,0 +1,99 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use strict;
+use warnings;
+
+my $predicate;
+my $subject;
+my $object;
+my $otype;
+my $olang;
+my $onlyliterals;
+my $noliterals;
+
+GetOptions (
+            "predicate=s"   => \$predicate,      # string
+            "subject=s"   => \$subject,      # string
+            "object=s"   => \$object,      # string
+            "otype=s"   => \$otype,      # string
+            "olang=s"   => \$olang,      # string
+            "only-literals"  => \$onlyliterals,   # flag
+            "no-literals"  => \$noliterals,   # flag
+) or help(1);
+sub help
+{
+	my( $exitcode ) = @_;
+
+	print STDERR "$0 [--predicate text] [--subject text] [--object text] [--otype text] [--olang text] [--only-literals|--no-literals] <filename>\n";
+
+	exit $exitcode;
+}
+
+if( $onlyliterals && $noliterals ) {
+	error( "Can't set --only-literals and --no-literals -- you'd have nothing left!" );
+}
+
+if( @ARGV != 1 )
+{	
+	error( "Did not specify a filename." );
+}
+my $filename = $ARGV[0];
+open( my $fh, "<:utf8", $filename ) || error( "Could not read $filename: $!" );
+while( my $line = readline( $fh ) )
+{
+	chomp $line;
+	# s,p,o all have a leading char
+	my( $s, $p, $o ) = split( /> /, $line, 3 );
+	my $islit = substr( $o, 0, 1 ) eq '"';
+	next if( $onlyliterals && !$islit );
+	next if( $noliterals && $islit );
+
+	#nb. using index search starting at char after the leading <
+	next if( defined $subject && index($s,$subject,1)==-1 );
+	
+	next if( defined $predicate && index($p,$predicate,1)==-1 );
+
+	my( $ot, $ol );
+	if( $islit )
+	{
+		( $o, $ot ) = split( /"\^\^\</, $o, 2 );
+		( $o, $ol ) = split( /"@/, $o, 2 );
+		# o has a leading char but ot does not but has some bits on the end
+		$ot =~ s/> \.$// if defined $ot;
+		$ol =~ s/ \.$// if defined $ol;
+		$o =~ s/" \.$// if !defined $ot && !defined $ol;
+	}
+	else
+	{
+		$o =~ s/\> \.$//;
+	}
+
+	next if( defined $object && index($o,$object,1)==-1 );
+
+	next if( defined $otype && (!defined $ot || index($ot,$otype,0)==-1 ));
+
+	next if( defined $olang && (!defined $ol || index($ol,$olang,0)==-1 ));
+
+	print $line."\n";
+}
+exit;
+
+
+
+
+
+
+
+
+
+sub error 
+{
+	my( $error ) = @_;
+
+	print STDERR "$error\n";
+
+	exit 1;
+}
+
+
