@@ -64,89 +64,33 @@ else
 my $seen = {}; # global
 LINE: while( my $line = readline( $fh ) )
 {
-	############################################################
-	# NTriples Line parser
-	# Repeated in every script so they are stand alone but if there's
-	# a bug it needs to be fixed in all the scripts
-	############################################################
-	chomp $line;
-	$line =~ m/^(\<([^>]*)\>|(_:[^ ]*)) \<([^>]*)\> (\<([^>]*)\>|(_:[^ ]*)|"([^"]*)"(\^\^\<([^>]*)\>|\@([^ ]+))?) \.$/;
-	my $s = $2||$3;
-	my $p = $4;
-	my $o = $6||$7||$8;
-	my $islit = defined $8;
-	my $ot = $10;
-	my $ol = $11;
-	############################################################
-	my $s_bnode = defined $3;
-	my $o_bnode = defined $7;
+	my $t = ntparse($line);
 
 	if( $sameas )
 	{
-		sameas( $s );
-		sameas( $p );
-		sameas( $o );
-		sameas( $ot );
+		sameas( $t->{s} );
+		sameas( $t->{p} );
+		sameas( $t->{o} );
+		sameas( $t->{ot} );
 		next LINE;
 	}
-		
 
-	my( $sout, $pout, $oout, $otout );
-
-	if( $s_bnode )
+	if( $t->{t} eq "triple" )	
 	{
-		$sout = $s;
-	}
-	else
-	{
-		$sout = "<".process($s).">";
+		$t->{s} = process($t->{s}) if( !$t->{s_bnode} );
+		$t->{p} = process($t->{p});
+		$t->{o} = process($t->{o}) if( !$t->{o_bnode} );
+		$t->{ot} = process($t->{ot}) if( $t->{ot} );
 	}
 
-	if( $o_bnode )
-	{
-		$oout = $o;
-	}
-	elsif( $islit )
-	{
-		$oout = "<".process($o).">";
-	}
+	ntprint($t);
 
-	# poor old p can't be a bnode
-	$pout = "<".process($p).">";
-
-	if( !$islit )
-	{
-		$oout = "<".process($o).">";
-	}
-	elsif( defined $ot )
-	{
-		$otout = "<".process($ot).">";
-	}
-
-	if( defined $ot )
-	{
-		print "$sout $pout \"$o\"^^$otout .\n";
-	}
-	elsif( defined $ol )
-	{
-		print "$sout $pout \"$o\"\@$ol .\n";
-	}
-	elsif( $islit )
-	{
-		print "$sout $pout \"$o\" .\n";
-	}
-	else
-	{
-		print "$sout $pout $oout .\n";
-	}
 }
 exit;
 
 sub process
 {
 	my( $uri) = @_;
-
-	return undef if( !defined $uri );
 
 	if( index( $uri, $prefixtohash ) == 0 )
 	{
@@ -173,7 +117,14 @@ sub sameas
 	return if index( $uri, $prefixtohash ) != 0;
 	return if $seen->{$uri};
 
-	print "<".hashuri($uri)."> <http://www.w3.org/2002/07/owl#sameAs> <$uri> .\n";
+	my $t = {
+		s=>hashuri($uri),
+		p=>"http://www.w3.org/2002/07/owl#sameAs",
+		o=>$uri,
+		islit=>0,
+		t=>"triple"
+	};
+	ntprint($t);
 	$seen->{$uri} = 1;
 }
 
@@ -191,3 +142,85 @@ sub error
 }
 
 
+############################################################
+# NTriples Line parser
+# Repeated in every script so they are stand alone but if there's
+# a bug it needs to be fixed in all the scripts
+# does not currently unescape literals 
+############################################################
+sub ntparse
+{
+	my( $line ) = @_;
+	chomp $line;
+	
+	if( $line =~ m/^\s*#(.*)/ ) { return { t=>"comment", "comment"=>$1 }; }
+	if( $line =~ m/^\s*$/ ) { return { t=>"blank" }; }
+
+	my $ok = $line =~ m/^(\<([^>]*)\>|(_:[^\s]*))\s+\<([^>]*)\>\s+(\<([^>]*)\>|(_:[^\s]*)|"([^"]*)"(\^\^\<([^>]*)\>|\@([^\s]+))?)\s*\.\s*$/;
+	if( !$ok ) { return { t=>"error" }; }
+	my $t={};
+	$t->{t} = "triple";
+	$t->{s} = $2||$3;
+	$t->{p} = $4;
+	$t->{o} = $6||$7||$8;
+	$t->{islit} = defined $8;
+	$t->{ot} = $10;
+	$t->{ol} = $11;
+	$t->{s_bnode} = defined $3;
+	$t->{o_bnode} = defined $7;
+	# does not currently unescape literals 
+
+	return $t;
+}
+############################################################
+# NTriples Line printer
+# Repeated in every script so they are stand alone but if there's
+# a bug it needs to be fixed in all the scripts
+############################################################
+sub ntprint
+{
+	my( $t ) = @_;
+
+	return if( $t->{t} eq "error" );
+	if( $t->{t} eq "blank" )
+	{
+		print "\n";
+		return;
+	}
+	if( $t->{t} eq "comment" )
+	{
+		print "#".$t->{comment}."\n";
+		return;
+	}
+
+	if( $t->{s_bnode} )
+	{
+		print $t->{s};
+	}
+	else
+	{
+		print "<".$t->{s}.">";
+	}
+	print " <".$t->{p}."> ";
+	if( $t->{o_bnode} )
+	{
+		print $t->{o};
+	}
+	elsif( !$t->{islit} )
+	{
+		print "<".$t->{o}.">";
+	}
+	else
+	{
+		print "\"".$t->{o}."\"";
+		if( $t->{ot} )
+		{
+			print "^^<".$t->{ot}.">";
+		}
+		elsif( $t->{ol} )
+		{
+			print "\@".$t->{ol};
+		}
+	}
+	print " .\n";
+}

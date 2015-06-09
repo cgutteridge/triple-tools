@@ -9,6 +9,8 @@ my $subject;
 my $object;
 my $otype;
 my $olang;
+my $onlycomments;
+my $nocomments;
 my $onlyliterals;
 my $noliterals;
 my $help;
@@ -21,6 +23,8 @@ GetOptions (
             "olang=s"   => \$olang,      # string
             "only-literals"  => \$onlyliterals,   # flag
             "no-literals"  => \$noliterals,   # flag
+            "only-comments"  => \$onlycomments,   # flag
+            "no-comments"  => \$nocomments,   # flag
             "help"  => \$help,   # flag
 ) or help(1);
 help(0) if( $help );
@@ -40,6 +44,8 @@ Filters a stream of NTriples to remove unwanted ones. Does not understand bnodes
 --otype <text>     : object type must containt this text
 --only-literals    : Only output triples where the object is a literal
 --no-literals      : Only output triples where the object is not a literal
+--only-comments    : Only output blank lines and comments
+--no-comments      : Remove blank lines and comments
 
 END
 	exit $exitcode;
@@ -48,6 +54,10 @@ END
 if( $onlyliterals && $noliterals ) {
 	error( "Can't set --only-literals and --no-literals -- you'd have nothing left!" );
 }
+if( $onlycomments && $nocomments ) {
+	error( "Can't set --only-comments and --no-comments -- you'd have nothing left!" );
+}
+
 
 @ARGV = ( "-" ) if( @ARGV == 0 ); #default to stdin
 if( @ARGV != 1 )
@@ -66,35 +76,29 @@ else
 }
 while( my $line = readline( $fh ) )
 {
-	############################################################
-	# NTriples Line parser
-	# Repeated in every script so they are stand alone but if there's
-	# a bug it needs to be fixed in all the scripts
-	############################################################
-	chomp $line;
-	$line =~ m/^(\<([^>]*)\>|(_:[^ ]*)) \<([^>]*)\> (\<([^>]*)\>|(_:[^ ]*)|"([^"]*)"(\^\^\<([^>]*)\>|\@([^ ]+))?) \.$/;
-	my $s = $2||$3;
-	my $p = $4;
-	my $o = $6||$7||$8;
-	my $islit = defined $8;
-	my $ot = $10;
-	my $ol = $11;
-	############################################################
+	my( $t ) = ntparse($line);
 
-	next if( $onlyliterals && !$islit );
-	next if( $noliterals && $islit );
+	next if( $t->{t} ne "triple" && $nocomments );
 
-	next if( defined $subject && index($s,$subject)==-1 );
+	if( $t->{t} eq "triple" )
+	{	
+		next if( $onlycomments );
+
+		next if( $onlyliterals && !$t->{islit} );
+		next if( $noliterals && $t->{islit} );
 	
-	next if( defined $predicate && index($p,$predicate)==-1 );
+		next if( defined $subject && index($t->{s},$subject)==-1 );
+		
+		next if( defined $predicate && index($t->{p},$predicate)==-1 );
+	
+		next if( defined $object && index($t->{o},$object)==-1 );
+	
+		next if( defined $otype && (!defined $t->{ot} || index($t->{ot},$otype)==-1 ));
+	
+		next if( defined $olang && (!defined $t->{ol} || index($t->{ol},$olang)==-1 ));
+	}
 
-	next if( defined $object && index($o,$object)==-1 );
-
-	next if( defined $otype && (!defined $ot || index($ot,$otype)==-1 ));
-
-	next if( defined $olang && (!defined $ol || index($ol,$olang)==-1 ));
-
-	print $line."\n";
+	ntprint($t);
 }
 exit;
 
@@ -116,3 +120,85 @@ sub error
 }
 
 
+############################################################
+# NTriples Line parser
+# Repeated in every script so they are stand alone but if there's
+# a bug it needs to be fixed in all the scripts
+# does not currently unescape literals 
+############################################################
+sub ntparse
+{
+	my( $line ) = @_;
+	chomp $line;
+	
+	if( $line =~ m/^\s*#(.*)/ ) { return { t=>"comment", "comment"=>$1 }; }
+	if( $line =~ m/^\s*$/ ) { return { t=>"blank" }; }
+
+	my $ok = $line =~ m/^(\<([^>]*)\>|(_:[^\s]*))\s+\<([^>]*)\>\s+(\<([^>]*)\>|(_:[^\s]*)|"([^"]*)"(\^\^\<([^>]*)\>|\@([^\s]+))?)\s*\.\s*$/;
+	if( !$ok ) { return { t=>"error" }; }
+	my $t={};
+	$t->{t} = "triple";
+	$t->{s} = $2||$3;
+	$t->{p} = $4;
+	$t->{o} = $6||$7||$8;
+	$t->{islit} = defined $8;
+	$t->{ot} = $10;
+	$t->{ol} = $11;
+	$t->{s_bnode} = defined $3;
+	$t->{o_bnode} = defined $7;
+	# does not currently unescape literals 
+
+	return $t;
+}
+############################################################
+# NTriples Line printer
+# Repeated in every script so they are stand alone but if there's
+# a bug it needs to be fixed in all the scripts
+############################################################
+sub ntprint
+{
+	my( $t ) = @_;
+
+	return if( $t->{t} eq "error" );
+	if( $t->{t} eq "blank" )
+	{
+		print "\n";
+		return;
+	}
+	if( $t->{t} eq "comment" )
+	{
+		print "#".$t->{comment}."\n";
+		return;
+	}
+
+	if( $t->{s_bnode} )
+	{
+		print $t->{s};
+	}
+	else
+	{
+		print "<".$t->{s}.">";
+	}
+	print " <".$t->{p}."> ";
+	if( $t->{o_bnode} )
+	{
+		print $t->{o};
+	}
+	elsif( !$t->{islit} )
+	{
+		print "<".$t->{o}.">";
+	}
+	else
+	{
+		print "\"".$t->{o}."\"";
+		if( $t->{ot} )
+		{
+			print "^^<".$t->{ot}.">";
+		}
+		elsif( $t->{ol} )
+		{
+			print "\@".$t->{ol};
+		}
+	}
+	print " .\n";
+}

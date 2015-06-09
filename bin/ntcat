@@ -1,87 +1,81 @@
 #!/usr/bin/perl
 
 use Getopt::Long;
-use Digest::MD5 qw/ md5_hex /;
 use strict;
 use warnings;
 
-my $namespace;
 my $help;
 
 srand();
 
 GetOptions (
-            "namespace=s"   => \$namespace,
             "help"  => \$help,   # flag
 ) or help(1);
 help(0) if( $help );
-help(1) if !defined $namespace;
 
 sub help
 {
 	my( $exitcode ) = @_;
 
 	print STDERR <<END;
-$0 --namespace <text> <filename>
+$0 <filename1> <filename2> ...
 
-Turns bnodes into URIs so that statements can be made about them. Uses 
-the bnode ID, time, process ID and a random number to get a value.
-
---namespace <text> : required. Namespace in which to create new URIs.
+Concatenates ntriple files but sets a new prefix on bnodes in each file so 
+they don't clash giving false links.
 
 END
 
 	exit $exitcode;
 }
 
-@ARGV = ( "-" ) if( @ARGV == 0 ); #default to stdin
-if( @ARGV != 1 )
-{	
-	error( "Did not specify a filename." );
+if( @ARGV == 0 )
+{
+	error( "Did not specify any filenames." );
 }
-my $filename = $ARGV[0];
+
+
+my @prefixes = ("A".."Z", "a".."z" );
+
+# mode is the number of characters to use in the prefix
+my $mode = 1;
+if( @ARGV > @prefixes ) { $mode = 2; }
+
 my $fh;
-if( $filename eq "-" )
+my $count = 0;
+foreach my $file ( @ARGV )
 {
-	$fh = *STDIN;
-}
-else
-{
-	open( $fh, "<:utf8", $filename ) || error( "Could not read $filename: $!" );
-}
-my $alias = {}; # global
-LINE: while( my $line = readline( $fh ) )
-{
-	my( $t ) = ntparse($line);
-
-	if( $t->{s_bnode} ) 
-	{ 
-		$t->{s} = mkalias( $t->{s} ); 
-		$t->{s_bnode} = 0;
-	}
-	if( $t->{o_bnode} ) 
-	{ 
-		$t->{o} = mkalias( $t->{o} ); 
-		$t->{o_bnode} = 0;
-	}
-	ntprint($t);
-}
-exit;
-
-sub mkalias
-{
-	my( $bnode) = @_;
-
-	if( !$alias->{$bnode} )
+	my $prefix;
+	if( $mode == 1 )
 	{
-		my $seed = time().":".$$.":".$bnode.":".rand(1000000);
-		$alias->{$bnode} = $namespace.md5_hex( $seed );
+		$prefix = $prefixes[$count];
+	}
+	else
+	{
+		$prefix = $prefixes[int( $count/(scalar @prefixes ))].$prefixes[ $count % (scalar @prefixes)];
 	}
 	
-	return( $alias->{$bnode} );
+	# really ntriples files should be ascii, but if not 
+	# lets treat them as utf8. Linked-data people like utf8.
+	open( $fh, "<:utf8", $file ) || failMessage( 2, "Failed to read $file: $!" );
+	while( my $line = readline( $fh ) )
+	{
+		my $t = ntparse($line);
+
+		if( $t->{s_bnode} )
+		{
+			$t->{s} =~ s/^_:/_:$prefix/;
+		}
+			
+		if( $t->{o_bnode} )
+		{
+			$t->{o} =~ s/^_:/_:$prefix/;
+		}
+			
+		ntprint($t);
+	}
+	$count ++;
 }
-
-
+exit 0;
 
 
 
@@ -93,8 +87,6 @@ sub error
 
 	exit 1;
 }
-
-
 
 ############################################################
 # NTriples Line parser
