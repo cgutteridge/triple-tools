@@ -1,5 +1,7 @@
 #!/usr/bin/perl
 
+# This is a cheap and cheerful way to anonymise RDF. Don't trust it.
+
 use Getopt::Long;
 use Digest::MD5 qw/ md5_hex /;
 use strict;
@@ -21,7 +23,7 @@ sub help
 {
 	my( $exitcode ) = @_;
 
-	print STDERR "urihash --prefix <text> --namespace <text> [--salt <text>] <filename>\n";
+	print STDERR "$0 --prefix <text> --namespace <text> [--salt <text>] <filename>\n";
 
 	exit $exitcode;
 }
