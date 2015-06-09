@@ -31,7 +31,15 @@ if( @ARGV != 1 )
 	error( "Did not specify a filename." );
 }
 my $filename = $ARGV[0];
-open( my $fh, "<:utf8", $filename ) || error( "Could not read $filename: $!" );
+my $fh;
+if( $filename eq "-" )
+{
+	$fh = *STDIN;
+}
+else
+{
+	open( $fh, "<:utf8", $filename ) || error( "Could not read $filename: $!" );
+}
 while( my $line = readline( $fh ) )
 {
 	chomp $line;
