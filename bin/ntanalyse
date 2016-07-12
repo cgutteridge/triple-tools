@@ -4,10 +4,14 @@ use Getopt::Long;
 use strict;
 use warnings;
 
+use Data::Dumper;
+
 my $help;
+my $output = "json";
 
 GetOptions (
             "help"  => \$help,   # flag
+            "output:s"  => \$output,   # string
 ) or help(1);
 help(0) if( $help );
 
@@ -16,7 +20,7 @@ sub help
 	my( $exitcode ) = @_;
 
 	print STDERR <<END;
-$0 <options> [<filename>]
+$0 [--output json|dump|d3] [<filename>]
 
 Reports stuff about an N-Triples dataset.
 
@@ -88,9 +92,9 @@ foreach my $t ( @triples ) {
 	}
 	foreach my $term ( @terms )
 	{
-		if( !defined $stats->{namespaces}->{namespace($term)} )
+		my $ns = namespace($term);
+		if( !defined $stats->{namespaces}->{$ns} )
 		{
-			my $ns = namespace($term);
 			$stats->{namespaces}->{$ns} = { total=>0, classes=>{}, predicates=>{} };
 			if( defined $namespaces->{$ns} )
 			{
@@ -102,7 +106,7 @@ foreach my $t ( @triples ) {
 	# init predicate, if needed
 	if( !defined $stats->{predicates}->{$t->{p}} ) 
 	{
-		$stats->{predicates}->{$t->{p}} = { total=>0, namespace=>namespace($t->{p}) };
+		$stats->{predicates}->{$t->{p}} = { total=>0, namespace=>namespace($t->{p}), term=>term($t->{p}) };
 		if( defined $namespaces->{ namespace($t->{p}) } )
 		{
 			$stats->{predicates}->{$t->{p}}->{prefix} = $namespaces->{ namespace($t->{p}) };
@@ -110,17 +114,10 @@ foreach my $t ( @triples ) {
 	}
 
 	# init class, if needed
-	if( $t->{p} eq "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
-         && !defined $stats->{classes}->{$t->{o}} ) 
+	if( $t->{p} eq "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" )
 	{
-		$stats->{classes}->{$t->{o}} = { total=>0, namespace=>namespace($t->{o}) };
-		if( defined $namespaces->{ namespace($t->{o}) } )
-		{
-			$stats->{classes}->{$t->{o}}->{prefix} = $namespaces->{ namespace($t->{o}) };
-		}
+		ensure_class( $stats, $t->{o} );
 	}
-
-
 
 	# class frequencies
 
@@ -162,6 +159,8 @@ foreach my $t ( @triples ) {
 	{
 		foreach my $to_class ( keys %$tos ) 
 		{
+			ensure_class( $stats, $to_class );
+			ensure_class( $stats, $from_class );
 			$stats->{classes}->{ $from_class }->{rels}->{ $t->{p} }->{classes}->{ $to_class }++;
 			$stats->{classes}->{ $to_class }->{invrels}->{ $t->{p} }->{classes}->{ $from_class }++;
 			$stats->{classes}->{ $from_class }->{rels}->{ $t->{p} }->{total}++;
@@ -184,8 +183,39 @@ foreach my $uri ( keys %{$types} )
 		}
 	}
 }
-use JSON::PP;
-print JSON::PP->new->pretty->encode( $stats );
+
+if( $output eq "d3" ) {
+  my $p=0;
+  my $data = { nodes=>[], links=>[] };
+  foreach my $uri ( keys %{$stats->{classes}} ) {
+    my $class = $stats->{classes}->{$uri};
+    push @{$data->{nodes}}, { id=>$uri, group=>1, total=>$class->{total}, title=>$uri." (".$class->{total}.")" };
+    foreach my $pred ( keys %{$class->{rels}} ) {
+      my $rel = $class->{rels}->{$pred};
+      foreach my $target ( keys %{$rel->{classes}} ) {
+	my $weight = $rel->{classes}->{$target};
+	my $pred_id = "p".($p++);
+        my $pred_node = { id => $pred_id, group => 2, total=>5 , title=>$pred ." (".$class->{total}.")"};
+	push @{$data->{nodes}}, $pred_node;
+	push @{$data->{links}}, { source=>$uri, target=>$pred_id, value=>$weight };
+	push @{$data->{links}}, { source=>$pred_id, target=>$target, value=>$weight };
+      }
+    }
+  }
+
+  eval { use JSON::PP; };
+  my $json = JSON::PP->new->pretty->encode( $data );
+  open( my $fh2, "<", "d3.template" );
+  my $html = join( "",<$fh2>);
+  close $fh2;
+  $html =~ s/\$JSONHERE\$/$json/;
+  print $html;
+}
+else
+{
+  eval { use JSON::PP; };
+  print JSON::PP->new->pretty->encode( $stats );
+}
 
 exit;
 
@@ -228,6 +258,21 @@ sub namespaces
 #          'islit' => 1,
 #          't' => 'triple',
 #          'o' => 'Snacks'
+
+sub ensure_class
+{
+	my( $stats, $class ) = @ _;
+
+        return if defined $stats->{classes}->{$class};
+
+	$stats->{classes}->{$class} = { total=>0, namespace=>namespace($class), term=>term($class) };
+	if( defined $namespaces->{ namespace($class) } )
+	{
+		$stats->{classes}->{$class}->{prefix} = $namespaces->{ namespace($class) };
+	}
+}
+
+
 
 
 
